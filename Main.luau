@@ -6,10 +6,10 @@ const TweenService = game:GetService("TweenService") -- Used for the beam fade
 const ReplicatedStorage = game:GetService("ReplicatedStorage")
 const Debris = game:GetService("Debris")
 
-const Assets = ReplicatedStorage:WaitForChild("Assets") 
+const Assets = ReplicatedStorage:WaitForChild("Assets")
 const BulletHoleTemplate = Assets:WaitForChild("BulletHole") :: BasePart
 
-const TurretModel = script.Parent :: Model -- The turret model is the script parent
+const TurretModel = script.Parent :: Model -- The turret model is the script's parent
 const TurretHead = TurretModel:WaitForChild("TurretHead", 15) :: Model
 
 const Highlight = TurretModel:WaitForChild("Highlight") :: Highlight -- Shows the stress level
@@ -30,27 +30,27 @@ const LocalPlayer = PlayerService.LocalPlayer
 
 -- >> Settings
 
-const DebrisFolder = workspace -- You can change it to any folder that has "Ignore" things
-const ShootRandomDirection = 3 -- Randomizes the bullet direction
+const DebrisFolder = workspace -- Folder where the beams, attachments and bullet holes are created. You can change it to any folder you want
+const ShootRandomDirection = 3 -- Random spread applied to each bullet's direction
 
 const DamagePerBulletFired = 1 -- Damage dealt per bullet
 const ShootingDistanceLimit = 40 -- If your character is farther than this, the turret stops shooting
 
 const HeadRotationVelocity = 5 -- How fast the turret head turns
-const HeadRotationLerping = 10 -- How fast it smooths the head into the real rotation
+const HeadRotationLerping = 10 -- How fast the head smoothly interpolates toward the target rotation
 
-const HeadExplosionRandomForce = 40 -- How random (in every axis) the head explosion will be
-const HeadExplosionForce = 120 -- How much force is going to be applied in the head explosion
+const HeadExplosionRandomForce = 40 -- How random the head explosion velocity is on every axis
+const HeadExplosionForce = 120 -- How much upward force is applied to the head when it explodes
 
-const BulletHoleDestroyingTime = 20 -- How much time the bullet hole stays on workspace
+const BulletHoleDestroyingTime = 20 -- How long the bullet hole stays in the workspace
 
-const FollowDebounceTime = 1 -- After the follow debounce turns true, it waits 1 second to turn it false
+const FollowDebounceTime = 1 -- After the follow debounce is set to true, it waits 1 second before setting it back to false
 
-const RayParams = RaycastParams.new() -- Raycast filter, change it if you want to stop shooting other things
+const RayParams = RaycastParams.new() -- Raycast filter. Change it if you want the turret to stop shooting other things
 RayParams.FilterType = Enum.RaycastFilterType.Exclude -- Excludes the FilterDescendantsInstances list from the raycast
 RayParams.FilterDescendantsInstances = {TurretModel} -- Ignores the turret model
 
-const ShootingBeamColor = ColorSequence.new(Color3.new(1, 0.627451, 0.0313725)) -- Color of the shooting beam effect, change it if you want
+const ShootingBeamColor = ColorSequence.new(Color3.new(1, 0.627451, 0.0313725)) -- Color of the shooting beam effect. Change it if you want
 
 -- >> Variables
 
@@ -62,15 +62,16 @@ local LookTarget = HeadRoot.CFrame :: CFrame -- Turret head rotation target
 local DiffNumber = 1 -- Direction of the Y axis rotation: 1 turns one way, -1 turns the other way
 local FollowTarget = false :: boolean -- When true, the turret follows your character
 
-local FollowDebounce = false :: boolean -- When true, it ignores the character and stops following it
+local FollowDebounce = false :: boolean -- When true, the turret is in cooldown and won't start following the character
 local Shooting = false :: boolean -- When true, the turret keeps shooting
 
-local StressLevel = 0 -- It increases per bullet, decreases when not shooting
-local StressLimit = 500 -- When the stress level passes it the turret stops shooting
+local StressLevel = 0 -- Increases with each bullet, decreases when not shooting
+local StressLimit = 500 -- When the stress level passes this, the turret stops shooting
 
 local IsStressed = false -- True while the turret is overheated
-local IsEnabled = true -- If you click in the turret (in ModelRoot) the turret is disabled
+local IsEnabled = true -- Set to false when you click the turret (ModelRoot), which disables it
 
+-- Called when your character is loaded
 const function OnCharacterAdded(NewCharacter: Model) : never
 	if not NewCharacter or not NewCharacter.Parent then return end -- Ignores it if your character doesn't exist
 
@@ -90,24 +91,27 @@ const function OnCharacterAdded(NewCharacter: Model) : never
 	end)
 end
 
+-- Checks if the character is in front of the turret
 const function IsCharacterOnSight() : boolean
 	-- Raycast forward from the head to see if it hits your character
 	const Raycast = workspace:Raycast(HeadRoot.Position, HeadRoot.CFrame.LookVector * ShootingDistanceLimit, RayParams)
 	return Raycast ~= nil and Raycast.Instance.Parent == CurrentCharacter
 end
 
+-- Emits every ParticleEmitter inside an object, using either the given emitCount or the "EmitCount" attribute
 const function EmitParticles(object: Instance | Attachment, emitCount: number) : never
-	for _, particle in object:QueryDescendants("ParticleEmitter") do -- Goes to every ParticleEmitter on object
-		particle:Emit(emitCount or particle:GetAttribute("EmitCount"))  -- Emits with your emitCount or gets the attribute
+	for _, particle in object:QueryDescendants("ParticleEmitter") do -- Goes through every ParticleEmitter in the object
+		particle:Emit(emitCount or particle:GetAttribute("EmitCount")) -- Emits using emitCount, or the attribute if emitCount is nil
 	end
 end
 
+-- Creates a raycast in the turret's looking direction. If your character is in front of it, the turret deals damage
 const function FireBullet() : never
 	-- Attachments that the beam uses as start and end points
 	const OriginPointAttach = Instance.new("Attachment", DebrisFolder)
 	const ShootPointAttach = Instance.new("Attachment", DebrisFolder)
-	OriginPointAttach.Position = FireParticles.WorldPosition -- The origin visual is at the FireParticles position
-	
+	OriginPointAttach.Position = FireParticles.WorldPosition -- The origin of the visual is at the FireParticles position
+
 	const ShootBeam = Instance.new("Beam", HeadRoot) -- The beam line
 	ShootBeam.Attachment0 = OriginPointAttach
 	ShootBeam.Attachment1 = ShootPointAttach
@@ -117,87 +121,90 @@ const function FireBullet() : never
 	ShootBeam.LightEmission = 10
 	ShootBeam.FaceCamera = true
 
-	const Tween = TweenService:Create(ShootBeam, TweenInfo.new(.15), {Width1 = 0}) -- Fadeout effect for the beam
+	const Tween = TweenService:Create(ShootBeam, TweenInfo.new(.15), {Width1 = 0}) -- Fade-out effect for the beam
 	Tween:Play()
 
-	Tween.Completed:Connect(function() -- Destroys itself after the fadeout
-		ShootBeam:Destroy() 
+	Tween.Completed:Connect(function() -- Destroys the beam and its attachments after the fade-out
+		ShootBeam:Destroy()
 		OriginPointAttach:Destroy()
 		ShootPointAttach:Destroy()
-	end) 
+	end)
 
 	-- Random spread so the bullets don't all go the same way
 	const RandomVector = Vector3.new(math.random(-ShootRandomDirection, ShootRandomDirection), math.random(-ShootRandomDirection, ShootRandomDirection), math.random(-ShootRandomDirection, ShootRandomDirection))
 	const LookCF = HeadRoot.CFrame
-	const Raycast = workspace:Raycast(LookTarget.Position, LookCF.LookVector * ShootingDistanceLimit + RandomVector, RayParams) -- Ignores the turret model and the other things in the list
+	const Raycast = workspace:Raycast(LookTarget.Position, LookCF.LookVector * ShootingDistanceLimit + RandomVector, RayParams) -- Ignores the turret model and the other objects in the filter list
 
 	if Raycast then
 		const Instance = Raycast.Instance
-		ShootPointAttach.Position = Raycast.Position -- End point of the beam goes to the hit position
+		ShootPointAttach.Position = Raycast.Position -- The end of the beam goes to the hit position
 		if CurrentCharacter and CurrentCharacter.PrimaryPart and Raycast.Instance.Parent == CurrentCharacter then
 			CurrentHumanoid:TakeDamage(DamagePerBulletFired) -- Damages the Humanoid
 		elseif not Instance.Parent:IsA("Accessory") then
-			const Offset = CFrame.new(Instance.Position, Instance.Position+Raycast.Normal) -- Gets the rotation by using raycast normal
+			const Offset = CFrame.new(Instance.Position, Instance.Position + Raycast.Normal) -- Gets the rotation from the raycast normal
 
-			const BulletHole = BulletHoleTemplate:Clone() -- Creates a bullet hole image
-			BulletHole.CFrame = CFrame.new(Raycast.Position)*Offset.Rotation*CFrame.Angles(math.rad(-90), 0, 0)
+			const BulletHole = BulletHoleTemplate:Clone() -- Creates a bullet hole decal
+			BulletHole.CFrame = CFrame.new(Raycast.Position) * Offset.Rotation * CFrame.Angles(math.rad(-90), 0, 0)
 			BulletHole.Parent = DebrisFolder
 
-			Debris:AddItem(BulletHole, BulletHoleDestroyingTime) -- After (BulletHoleDestroyingTime) seconds: the bullet hole image is destroyed
+			Debris:AddItem(BulletHole, BulletHoleDestroyingTime) -- Destroys the bullet hole after BulletHoleDestroyingTime seconds
 		end
 	else
-		ShootPointAttach.Position = LookTarget.Position + (LookCF.LookVector * ShootingDistanceLimit + RandomVector) -- End point goes to the max distance
+		ShootPointAttach.Position = LookTarget.Position + (LookCF.LookVector * ShootingDistanceLimit + RandomVector) -- The end of the beam goes to the max distance
 	end
 end
 
+-- Loops, calling FireBullet every 0.05 seconds, and adds stress to the turret
+-- If the turret is stressed, it stops shooting
 const function StartShooting()
-	if Shooting then return end
-	Shooting = true
+	if Shooting then return end -- Checks if the turret is already shooting
+	Shooting = true -- Marks the turret as shooting
 
 	local t = os.clock() -- Saves the time of the last shot
 
-	while Shooting and IsEnabled do -- After .05 seconds it emits the particle effect and fires a bullet
-		const dt = os.clock()-t -- Time since the last shot
+	while Shooting and IsEnabled do -- Fires a bullet every 0.05 seconds
+		const dt = os.clock() - t -- Time since the last shot
 		t = os.clock()
 
 		if IsStressed then task.wait() continue end -- Skips shooting while overheated
 
-		EmitParticles(FireParticles, 1)
-		FireBullet()
+		EmitParticles(FireParticles, 1) -- Emits the front fire particles
+		FireBullet() -- Fires a bullet raycast
 
-		StressLevel += dt*100 -- Stress builds up while shooting
-		if StressLevel>StressLimit then
+		StressLevel += dt * 100 -- Stress builds up while shooting
+		if StressLevel > StressLimit then -- If the stress level is over the limit, marks the turret as stressed
 			IsStressed = true
-			StressLevel = StressLimit
+			StressLevel = StressLimit -- Keeps the stress from going over the limit
 		end
-		
-		task.wait(.05)
+
+		task.wait(.05) -- Waits 0.05 seconds before the next bullet
 	end
 end
 
 const Connections = {}
 
+-- Runs every rendered frame
 const function OnRenderStepped(deltaTime: number)
 	const CharacterPrimaryPart = CurrentCharacter and CurrentCharacter.PrimaryPart
 	const CharacterDistance = CharacterPrimaryPart and (CharacterPrimaryPart.Position - HeadRoot.Position).Magnitude
-	
-	if not IsEnabled then 
+
+	if not IsEnabled then
 		const CurrentHeadCF = TurretHead:GetPivot()
 		const Alpha = 1 - math.exp(-4 * deltaTime)
-		
+
 		TurretHead:PivotTo(
-			CurrentHeadCF:Lerp(CFrame.new(CurrentHeadCF.Position)*CFrame.Angles(math.rad(90), 0, math.rad(90)), Alpha))
-		
+			CurrentHeadCF:Lerp(CFrame.new(CurrentHeadCF.Position) * CFrame.Angles(math.rad(90), 0, math.rad(90)), Alpha))
+
 		return
 	end
-	
-	Highlight.FillTransparency = 1-StressLevel/StressLimit -- More stress, more visible highlight
+
+	Highlight.FillTransparency = 1 - StressLevel / StressLimit -- More stress, more visible highlight
 
 	-- Cools down when not shooting or when stressed
-	if (not Shooting or IsStressed) and StressLevel>0 then
-		StressLevel -= deltaTime*100
+	if (not Shooting or IsStressed) and StressLevel > 0 then
+		StressLevel -= deltaTime * 100
 
-		if StressLevel<=0 then
+		if StressLevel <= 0 then
 			IsStressed = false
 			StressLevel = 0
 		end
@@ -209,24 +216,24 @@ const function OnRenderStepped(deltaTime: number)
 		Shooting = false -- Stops shooting bullets
 	end
 
-	-- Only starts following if the debounce is over and the character is in sight
+	-- Only starts following if the debounce is over, the character is within range, and the turret can see the character
 	if not FollowDebounce
-		and not FollowTarget -- Checks if it's already following the character
+		and not FollowTarget -- Checks if it's not already following the character
 		and CharacterPrimaryPart -- Checks if the character exists
 		and CharacterDistance <= ShootingDistanceLimit -- Checks if the character is within the shooting limit
-		and IsCharacterOnSight() then -- Checks if the turret is seeing the character
-		
-		task.spawn(StartShooting) -- Thread spawned so the shooting loop doesn't block this frame
+		and IsCharacterOnSight() then -- Checks if the turret can see the character
+
+		task.spawn(StartShooting) -- Spawns a thread so the shooting loop doesn't block this frame
 		FollowTarget = true -- Starts following the character
 	end
 
 	if not FollowTarget then
-		-- Auto head rotation (in Y Axis only)
+		-- Automatic head rotation (Y axis only)
 		const _, Y = LookTarget:ToOrientation()
-		LookTarget = CFrame.new(LookTarget.Position)*CFrame.Angles(0, Y+math.rad(deltaTime * HeadRotationVelocity * 10 * DiffNumber), 0)
+		LookTarget = CFrame.new(LookTarget.Position) * CFrame.Angles(0, Y + math.rad(deltaTime * HeadRotationVelocity * 10 * DiffNumber), 0)
 
 	elseif CharacterPrimaryPart then -- If the character exists
-		-- Starts following the local character	
+		-- Follows the local character
 		LookTarget = CFrame.new(LookTarget.Position, CharacterPrimaryPart.Position)
 	end
 
@@ -241,18 +248,18 @@ const function OnRenderStepped(deltaTime: number)
 		if FollowTarget and not FollowDebounce then
 			Shooting = false -- Stops shooting bullets
 			FollowDebounce = true
-			
+
 			task.delay(FollowDebounceTime, function() FollowDebounce = false end)
 		end
 
-		FollowTarget = false -- Went past the limit: always drop the target
+		FollowTarget = false -- Went past the limit, so always drop the target
 
 		if YAxis * DiffNumber > 0 then -- Reverses direction only if it's going outside the limit
 			DiffNumber *= -1
 		end
 	end
 
-	-- Smoothly interpolates the head rotation toward the LookTarget
+	-- Smoothly interpolates the head rotation toward LookTarget
 	const CurrentHeadCF = TurretHead:GetPivot()
 	const Alpha = 1 - math.exp(-HeadRotationLerping * deltaTime)
 	TurretHead:PivotTo(CurrentHeadCF:Lerp(LookTarget, Alpha))
@@ -264,38 +271,38 @@ table.insert(Connections, LocalPlayer.CharacterAdded:Connect(OnCharacterAdded)) 
 table.insert(Connections, RunService.RenderStepped:Connect(OnRenderStepped)) -- Runs the turret logic every frame
 
 table.insert(Connections, DisableTurretClicker.MouseClick:Connect(function()
-	if not IsStressed then return end -- The Turret can only be disabled if it's stressed
+	if not IsStressed then return end -- The turret can only be disabled if it's stressed
 	if not IsEnabled then return end
-	
-	ModelRoot.CanCollide = false
-	IsEnabled = false -- Starts doing the "disabled" animation
-	
-	TweenService:Create(Highlight, TweenInfo.new(.5), {
-		FillTransparency=1 -- Removes the red highlight
-	}):Play()
-	
-	HeadRoot.Origin.Beam.Enabled = false -- Removes the beam after disable
-	
-	task.wait(1) -- After 1 second
 
-	EmitParticles(ModelRoot.Attachment, 1) -- Emit the Explosion Effect particles
-	
-	for _, part in TurretHead:QueryDescendants("BasePart") do -- Goes to every turret head part
-		part.Anchored = false -- And apply physics to them by removing the anchor
+	ModelRoot.CanCollide = false
+	IsEnabled = false -- Starts the "disabled" animation
+
+	TweenService:Create(Highlight, TweenInfo.new(.5), {
+		FillTransparency = 1 -- Removes the red highlight
+	}):Play()
+
+	HeadRoot.Origin.Beam.Enabled = false -- Removes the beam once disabled
+
+	task.wait(1) -- Waits 1 second
+
+	EmitParticles(ModelRoot.Attachment, 1) -- Emits the explosion effect particles
+
+	for _, part in TurretHead:QueryDescendants("BasePart") do -- Goes through every part of the turret head
+		part.Anchored = false -- Applies physics by removing the anchor
 	end
-	
-	const RandomVelocity = Vector3.new( -- Gets a random velocity in every axis
+
+	const RandomVelocity = Vector3.new( -- Random velocity on every axis
 		math.random(-HeadExplosionRandomForce, HeadExplosionRandomForce),
 		math.random(-HeadExplosionRandomForce, HeadExplosionRandomForce),
-		math.random(-HeadExplosionRandomForce, HeadExplosionRandomForce) 
+		math.random(-HeadExplosionRandomForce, HeadExplosionRandomForce)
 	)
-	
-	HeadRoot:ApplyImpulse( -- The head goes up by the explosion
-		Vector3.yAxis*HeadRoot.Mass*HeadExplosionForce+RandomVelocity)
-	
+
+	HeadRoot:ApplyImpulse( -- Launches the head upward with the explosion
+		Vector3.yAxis * HeadRoot.Mass * HeadExplosionForce + RandomVelocity)
+
 	HeadRoot.AssemblyAngularVelocity = RandomVelocity -- Applies a random angular velocity
-	
-	for _, con in Connections do -- Goes to every connection
-		con:Disconnect() -- And Disconnect permanently 
+
+	for _, con in Connections do -- Goes through every connection
+		con:Disconnect() -- Disconnects it permanently
 	end
 end))
